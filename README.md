@@ -15,7 +15,7 @@ Emotions play a crucial role in human behavior and decision-making, making emoti
 - Python 3.8
 - For other dependencies, see [requirements.txt](./requirements.txt)
 
-## Parameter
+## Parameters
  - **LR schedule**: Cosine decay (LambdaLR), decays from initial `lr` to `lrf * lr` (default `lrf=0.1`).
  - **Batch size**: Train `batch_size=14`; test defaults to the same (configurable via `test_batch_size`).
  - **Epochs**: `epochs=100` (editable in `config/multi_instance.json`).
