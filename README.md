@@ -16,19 +16,17 @@ Emotions play a crucial role in human behavior and decision-making, making emoti
 - For other dependencies, see [requirements.txt](./requirements.txt)
 
 ## Parameters
- - **LR schedule**: Cosine decay (LambdaLR), decays from initial `lr` to `lrf * lr` (default `lrf=0.1`).
- - **Batch size**: Train `batch_size=14`; test defaults to the same (configurable via `test_batch_size`).
- - **Epochs**: `epochs=100` (editable in `config/multi_instance.json`).
- - **Optimizer**: AdamW (`lr=1e-4`; other params use PyTorch defaults).
- - **MIL**: `num_instances=10` per sample; selection `K=num_select=2`; method `instance_selection_method=attention_weighted_topk`.
- - **Fusion**: `fusion_type=none` (options: `none`, `cross_attention`, `mlp`).
- - **Transformer encoder**: `d_model=768`, `nhead=12`, `dim_feedforward=2048`, `num_layers=2`, `dropout=0.2`; CLS dropout `0.1`.
- - **Seed**: `seed=0`.
-
+  - **LR schedule**: Cosine decay reduces lr from its initial value to lrf×lr with lrf=0.1 by default.
+  - **Batch size**: Train with batch size 14 and use the same for test.
+  - **Epochs**: Train for 100 epochs; change it in config/multi_instance.json if needed.
+  - **Optimizer**: AdamW with lr 1e-4 and other PyTorch defaults.
+  - **MIL**: Use 10 instances per sample and select top 2 by attention-weighted top-k.
+  - **Fusion**: Fusion type is none; available options are none, cross_attention, and mlp.
+  - **Transformer encoder**: d_model 768, nhead 12, dim_feedforward 2048, num_layers 2, dropout 0.2, CLS dropout 0.1.
+  - **Seed**: Random seed 0.
 
 ## Reference
 
-```
 @article{wang2025milmer,
   title={Milmer: a Framework for Multiple Instance Learning based Multimodal Emotion Recognition},
   author={Wang, Zaitian and He, Jian and Liang, Yu and Hu, Xiyuan and Peng, Tianhao and Wang, Kaixin and Wang, Jiakai and Zhang, Chenlong and Zhang, Weili and Niu, Shuang and others},
