@@ -15,6 +15,16 @@ Emotions play a crucial role in human behavior and decision-making, making emoti
 - Python 3.8
 - For other dependencies, see [requirements.txt](./requirements.txt)
 
+## Parameter
+ - **LR schedule**: Cosine decay (LambdaLR), decays from initial `lr` to `lrf * lr` (default `lrf=0.1`).
+ - **Batch size**: Train `batch_size=14`; test defaults to the same (configurable via `test_batch_size`).
+ - **Epochs**: `epochs=100` (editable in `config/multi_instance.json`).
+ - **Optimizer**: AdamW (`lr=1e-4`; other params use PyTorch defaults).
+ - **MIL**: `num_instances=10` per sample; selection `K=num_select=2`; method `instance_selection_method=attention_weighted_topk`.
+ - **Fusion**: `fusion_type=none` (options: `none`, `cross_attention`, `mlp`).
+ - **Transformer encoder**: `d_model=768`, `nhead=12`, `dim_feedforward=2048`, `num_layers=2`, `dropout=0.2`; CLS dropout `0.1`.
+ - **Seed**: `seed=0`.
+
 
 ## Reference
 
@@ -25,4 +35,3 @@ Emotions play a crucial role in human behavior and decision-making, making emoti
   journal={arXiv preprint arXiv:2502.00547},
   year={2025}
 }
-```
