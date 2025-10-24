@@ -9,5 +9,6 @@
   "num_instances": 10,
   "instance_selection_method": "attention_weighted_topk",
   "fusion_type": "none",
-  "num_select": 2
+  "num_select": 2,
+  "pretrained_model": "swin-tiny-patch4-window7-224-finetuned-face-emotion-v12"
 }

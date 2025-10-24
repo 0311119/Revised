@@ -23,21 +23,19 @@ from pathlib import Path
     -----------------------------数据初始化--------------------------------
 '''
 
-# swin模块来源：https://huggingface.co/microsoft/swin-tiny-patch4-window7-224
-# swin_processor = AutoImageProcessor.from_pretrained("./weights/swin-tiny-patch4-window7-224")
-# swin_model = SwinModel.from_pretrained("./weights/swin-tiny-patch4-window7-224")
-
-# swin_finetuned模块来源：https://huggingface.co/MahmoudWSegni/swin-tiny-patch4-window7-224-finetuned-face-emotion-v12_right
-swin_processor = AutoImageProcessor.from_pretrained("./weights/swin-tiny-patch4-window7-224-finetuned-face-emotion-v12")
-swin_model = SwinModel.from_pretrained("./weights/swin-tiny-patch4-window7-224-finetuned-face-emotion-v12")
-
-# swin_v2 模块来源：https://huggingface.co/microsoft/swinv2-tiny-patch4-window8-256
-# swin_processor = AutoImageProcessor.from_pretrained("./weights/swinv2-tiny-patch4-window8-256")
-# swin_model = SwinModel.from_pretrained("./weights/swinv2-tiny-patch4-window8-256")
-
 config_path = Path(__file__).resolve().parent.parent / "config" / "multi_instance.json"
 with open(config_path, "r", encoding="utf-8") as f:
     cfg = json.load(f)
+
+# Load pretrained model from config
+# Available models:
+# - swin-tiny-patch4-window7-224: https://huggingface.co/microsoft/swin-tiny-patch4-window7-224
+# - swin-tiny-patch4-window7-224-finetuned-face-emotion-v12: https://huggingface.co/MahmoudWSegni/swin-tiny-patch4-window7-224-finetuned-face-emotion-v12
+# - swinv2-tiny-patch4-window8-256: https://huggingface.co/microsoft/swinv2-tiny-patch4-window8-256
+pretrained_model_name = cfg.get("pretrained_model", "swin-tiny-patch4-window7-224-finetuned-face-emotion-v12")
+pretrained_model_path = f"./weights/{pretrained_model_name}"
+swin_processor = AutoImageProcessor.from_pretrained(pretrained_model_path)
+swin_model = SwinModel.from_pretrained(pretrained_model_path)
 
 subject_id = os.getenv("ID", "s08")
 tb_dir = os.getenv("TB_DIR", "runs/run2")
@@ -141,29 +139,35 @@ class MultiModalClassifier(nn.Module):
                  num_select = 2, num_instances=10
                  ):
         super().__init__()
-        self.transformer_dropout_rate = transformer_dropout_rate
-        self.cls_dropout_rate = cls_dropout_rate
-        self.fusion_type = fusion_type
-        self.instance_selection_method = instance_selection_method
+        # Core hyperparameters and options
+        self.transformer_dropout_rate = transformer_dropout_rate  # Dropout used in Transformer layers
+        self.cls_dropout_rate = cls_dropout_rate  # Dropout applied to the CLS token output
+        self.fusion_type = fusion_type  # Fusion strategy for image features
+        self.instance_selection_method = instance_selection_method  # MIL instance selection method
 
+        # Swin image processor and backbone (fine-tuned)
         self.img_processor = swin_processor
         self.swin_model = swin_model
         for param in self.swin_model.parameters():
-            param.requires_grad = True
+            param.requires_grad = True  # Enable fine-tuning
 
+        # Token type embeddings: 0 for image tokens, 1 for EEG tokens
         self.token_type_embeddings = nn.Embedding(2, input_size)
         
+        # Transformer encoder over concatenated image and EEG tokens
         self.transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=input_size, nhead=num_heads, dim_feedforward=dim_feedforward, dropout=transformer_dropout_rate, batch_first=True),
             num_layers=num_encoder_layers
         )
 
-        self.eeg_proj = nn.Linear(eeg_size, input_size)
+        # EEG projection and normalization
+        self.eeg_proj = nn.Linear(eeg_size, input_size)  # Project EEG from eeg_size to hidden size
         self.activation = nn.ReLU()
-        self.layernorm = nn.LayerNorm(eeg_size)
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, input_size)).to(device)
-        self.dropout = nn.Dropout(cls_dropout_rate)
-        self.classifier = nn.Linear(input_size,num_classes)
+        self.layernorm = nn.LayerNorm(eeg_size)  # Normalize along the last EEG dimension
+        # Classification head
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, input_size)).to(device)  # Learnable CLS token
+        self.dropout = nn.Dropout(cls_dropout_rate)  # Dropout before classifier
+        self.classifier = nn.Linear(input_size,num_classes)  # Final classifier
 
         # Initialize cross-attention components only when fusion_type == 'cross_attention'
         if fusion_type == 'cross_attention':
@@ -186,7 +190,7 @@ class MultiModalClassifier(nn.Module):
         self.num_instances = num_instances
         self.num_select = num_select
         # Instance weights parameter for the softmax method
-        self.instance_weights = nn.Parameter(torch.ones(1, num_instances))
+        self.instance_weights = nn.Parameter(torch.ones(1, num_instances))  # Global learnable instance weights (used by 'softmax' method)
 
         # AMIL attention projection layers
         self.amil_value_proj = nn.Linear(input_size, input_size)
@@ -198,6 +202,7 @@ class MultiModalClassifier(nn.Module):
         self.topk_dimension_recover = nn.Linear(input_size * 49, self.num_instances)  # recover per-instance dimension
 
     def select_instances(self, images_embedding):
+        # images_embedding shape: [batch_size, num_instances, 49, 768]
         if self.instance_selection_method == 'none':
             # Return the embedding of the first image
             return images_embedding[:, 0, :, :].unsqueeze(1)
@@ -299,7 +304,7 @@ class MultiModalClassifier(nn.Module):
             embedding = self.swin_model(**vision_inputs).last_hidden_state
             images_embedding.append(embedding)
         
-        images_embedding = torch.stack(images_embedding, dim=1)  # [batch_size, num_instances, 49, 768]
+        images_embedding = torch.stack(images_embedding, dim=1)  # [batch_size, num_instances, 49, 768] (49 = 7x7 patches)
         # print("After stack:", images_embedding.shape)  # torch.Size([16, 10, 49, 768])
 
         # Select instances
@@ -332,11 +337,13 @@ class MultiModalClassifier(nn.Module):
         eeg_embedding = self.eeg_proj(eeg_data)
         eeg_embedding = self.activation(eeg_embedding)
 
+        # Add token-type embeddings to distinguish modalities
         images_embedding, eeg_embedding = (
             images_embedding + self.token_type_embeddings(torch.zeros(images_embedding.shape[0], 1, dtype=torch.long, device=device)),
             eeg_embedding + self.token_type_embeddings(torch.ones(eeg_embedding.shape[0], 1, dtype=torch.long, device=device))
         )
 
+        # Concatenate image and EEG tokens, prepend CLS, and encode
         multi_embedding = torch.cat((images_embedding, eeg_embedding), dim=1)
         multi_embedding = torch.cat((self.cls_token.expand(multi_embedding.size(0), -1, -1), multi_embedding), dim=1)
         multi_embedding = self.transformer_encoder(multi_embedding)

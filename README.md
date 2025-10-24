@@ -16,6 +16,8 @@ Emotions play a crucial role in human behavior and decision-making, making emoti
 - For other dependencies, see [requirements.txt](./requirements.txt)
 
 ## Parameters
+For detailed parameter configuration, please refer to the [config](./config) folder.
+  - **Pretrained model**: Use swin-tiny-patch4-window7-224-finetuned-face-emotion-v12 by default.
   - **LR schedule**: Cosine decay reduces lr from its initial value to lrf×lr with lrf=0.1 by default.
   - **Batch size**: Train with batch size 14 and use the same for test.
   - **Epochs**: Train for 100 epochs; change it in config/multi_instance.json if needed.
