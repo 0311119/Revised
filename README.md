@@ -22,8 +22,8 @@ For detailed parameter configuration, please refer to the [config](./config) fol
   - **Batch size**: Train with batch size 14 and use the same for test.
   - **Epochs**: Train for 100 epochs; change it in config/multi_instance.json if needed.
   - **Optimizer**: AdamW with lr 1e-4 and other PyTorch defaults.
-  - **MIL**: Use 10 instances per sample and select top 2 by attention-weighted top-k.
-  - **Fusion**: Fusion type is none; available options are none, cross_attention, and mlp.
+  - **MIL**: Use 10 instances per sample and select top 3 by attention-weighted top-k.
+  - **Fusion**: Fusion type is cross_attention; available options are none, cross_attention, and mlp.
   - **Transformer encoder**: d_model 768, nhead 12, dim_feedforward 2048, num_layers 2, dropout 0.2, CLS dropout 0.1.
   - **Seed**: Random seed 0.
 

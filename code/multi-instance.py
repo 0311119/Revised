@@ -134,9 +134,9 @@ class MultiModalClassifier(nn.Module):
     def __init__(self, input_size=768, num_classes=4, 
                  num_heads=12, dim_feedforward=2048, num_encoder_layers=2, device=device, 
                  eeg_size=384, transformer_dropout_rate=0.2, cls_dropout_rate=0.1,
-                 fusion_type='none',  # options: 'none', 'cross_attention', 'mlp'
+                 fusion_type='cross_attention',  # options: 'none', 'cross_attention', 'mlp'
                  instance_selection_method='attention_weighted_topk',  # options: 'none', 'softmax', 'amil', 'attention_topk', 'attention_weighted_topk'
-                 num_select = 2, num_instances=10
+                 num_select = 3, num_instances=10
                  ):
         super().__init__()
         # Core hyperparameters and options
