@@ -129,68 +129,95 @@ class MultiModalDataset(torch.utils.data.Dataset):
         label = self.labels[index]
         return eeg_sample, images_stack, label
 
-# 分类模型
+# Classification model
 class MultiModalClassifier(nn.Module):
-    def __init__(self, input_size=768, num_classes=4, 
-                 num_heads=12, dim_feedforward=2048, num_encoder_layers=2, device=device, 
-                 eeg_size=384, transformer_dropout_rate=0.2, cls_dropout_rate=0.1,
-                 fusion_type='cross_attention',  # options: 'none', 'cross_attention', 'mlp'
-                 instance_selection_method='attention_weighted_topk',  # options: 'none', 'softmax', 'amil', 'attention_topk', 'attention_weighted_topk'
-                 num_select = 3, num_instances=10
-                 ):
+    """
+    This class implements a multi-instance learning approach for emotion recognition
+    using both EEG signals and facial images.
+    """
+    def __init__(self, input_size = 768, num_classes = 4, 
+                 num_heads = 12, dim_feedforward = 2048, num_encoder_layers = 2, device = device, 
+                 eeg_size = 384, transformer_dropout_rate = 0.2, cls_dropout_rate = 0.1,
+                 fusion_type = 'cross_attention',  # options: 'none', 'cross_attention', 'mlp'
+                 instance_selection_method = 'attention_weighted_topk',  # options: 'none', 'softmax', 'amil', 'attention_topk', 'attention_weighted_topk'
+                 num_select = 3, num_instances = 10):
+        """
+        Args:
+            input_size (int): Hidden dimension size for transformer layers
+            num_classes (int): Number of output classes for classification
+            num_heads (int): Number of attention heads in transformer
+            dim_feedforward (int): Feedforward dimension in transformer layers
+            num_encoder_layers (int): Number of transformer encoder layers
+            device: Device to run the model on
+            eeg_size (int): Input dimension of EEG data
+            transformer_dropout_rate (float): Dropout rate for transformer layers
+            cls_dropout_rate (float): Dropout rate for classification head
+            fusion_type (str): Type of fusion strategy for image features
+            instance_selection_method (str): Method for selecting instances in MIL
+            num_select (int): Number of instances to select
+            num_instances (int): Total number of instances available
+        """
         super().__init__()
+        
         # Core hyperparameters and options
-        self.transformer_dropout_rate = transformer_dropout_rate  # Dropout used in Transformer layers
-        self.cls_dropout_rate = cls_dropout_rate  # Dropout applied to the CLS token output
-        self.fusion_type = fusion_type  # Fusion strategy for image features
-        self.instance_selection_method = instance_selection_method  # MIL instance selection method
-
+        self.transformer_dropout_rate = transformer_dropout_rate
+        self.cls_dropout_rate = cls_dropout_rate
+        self.fusion_type = fusion_type
+        self.instance_selection_method = instance_selection_method
         # Swin image processor and backbone (fine-tuned)
         self.img_processor = swin_processor
         self.swin_model = swin_model
         for param in self.swin_model.parameters():
-            param.requires_grad = True  # Enable fine-tuning
+            # Enable fine-tuning
+            param.requires_grad = True
 
         # Token type embeddings: 0 for image tokens, 1 for EEG tokens
         self.token_type_embeddings = nn.Embedding(2, input_size)
         
         # Transformer encoder over concatenated image and EEG tokens
         self.transformer_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=input_size, nhead=num_heads, dim_feedforward=dim_feedforward, dropout=transformer_dropout_rate, batch_first=True),
-            num_layers=num_encoder_layers
+            nn.TransformerEncoderLayer(
+                d_model = input_size, 
+                nhead = num_heads, 
+                dim_feedforward = dim_feedforward, 
+                dropout = transformer_dropout_rate, 
+                batch_first = True
+            ),
+            num_layers = num_encoder_layers
         )
 
         # EEG projection and normalization
-        self.eeg_proj = nn.Linear(eeg_size, input_size)  # Project EEG from eeg_size to hidden size
+        self.eeg_proj = nn.Linear(eeg_size, input_size)
         self.activation = nn.ReLU()
-        self.layernorm = nn.LayerNorm(eeg_size)  # Normalize along the last EEG dimension
+        self.layernorm = nn.LayerNorm(eeg_size)
+        
         # Classification head
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, input_size)).to(device)  # Learnable CLS token
-        self.dropout = nn.Dropout(cls_dropout_rate)  # Dropout before classifier
-        self.classifier = nn.Linear(input_size,num_classes)  # Final classifier
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, input_size)).to(device)
+        self.dropout = nn.Dropout(cls_dropout_rate)
+        self.classifier = nn.Linear(input_size, num_classes)  # Final classifier
 
         # Initialize cross-attention components only when fusion_type == 'cross_attention'
         if fusion_type == 'cross_attention':
             self.num_queries = 147
             self.query_tokens = nn.Parameter(torch.zeros(1, self.num_queries, input_size))
-            nn.init.normal_(self.query_tokens, std=0.02)
+            nn.init.normal_(self.query_tokens, std = 0.02)
             self.cross_attention = nn.MultiheadAttention(
-                embed_dim=input_size,
-                num_heads=num_heads,
-                dropout=transformer_dropout_rate,
-                batch_first=True
+                embed_dim = input_size,
+                num_heads = num_heads,
+                dropout = transformer_dropout_rate,
+                batch_first = True
             )
         # MLP up/down projection components
         elif fusion_type == 'mlp':
-            self.mlp_up = nn.Linear(input_size, 4*input_size)  # 768 -> 3072
+            self.mlp_up = nn.Linear(input_size, 4 * input_size)  # 768 -> 3072
             self.mlp_act = nn.GELU()
-            self.mlp_down = nn.Linear(4*input_size, input_size)  # 3072 -> 768
-
+            self.mlp_down = nn.Linear(4 * input_size, input_size)  # 3072 -> 768
 
         self.num_instances = num_instances
         self.num_select = num_select
-        # Instance weights parameter for the softmax method
-        self.instance_weights = nn.Parameter(torch.ones(1, num_instances))  # Global learnable instance weights (used by 'softmax' method)
+
+        # Global learnable instance weights (used by 'softmax' method)
+        self.instance_weights = nn.Parameter(torch.ones(1, num_instances))
 
         # AMIL attention projection layers
         self.amil_value_proj = nn.Linear(input_size, input_size)
@@ -199,139 +226,131 @@ class MultiModalClassifier(nn.Module):
         # Top-K attention projection layers
         self.topk_value_proj = nn.Linear(input_size * 49, input_size * 49)
         self.topk_weight_proj = nn.Linear(input_size * 49, 1)
-        self.topk_dimension_recover = nn.Linear(input_size * 49, self.num_instances)  # recover per-instance dimension
+        self.topk_dimension_recover = nn.Linear(input_size * 49, self.num_instances)
 
     def select_instances(self, images_embedding):
-        # images_embedding shape: [batch_size, num_instances, 49, 768]
+        """
+        Select instances from multiple image embeddings using different MIL methods.
+        """
         if self.instance_selection_method == 'none':
             # Return the embedding of the first image
             return images_embedding[:, 0, :, :].unsqueeze(1)
         
         elif self.instance_selection_method == 'softmax':
             # Compute weight for each instance
-            weights = F.softmax(self.instance_weights, dim=1)
+            weights = F.softmax(self.instance_weights, dim = 1)
             # Select top-k instances
-            _, indices = torch.topk(weights, self.num_select, dim=1)
+            _, indices = torch.topk(weights, self.num_select, dim = 1)
             selected_embeddings = []
             batch_size = images_embedding.size(0)
             
             for i in range(batch_size):
-                selected = images_embedding[i, indices[0], :]  # Select the k instances with the highest weights
+                # Select the k instances with the highest weights
+                selected = images_embedding[i, indices[0], :]
                 selected_embeddings.append(selected)
                 
             return torch.stack(selected_embeddings)
         
         elif self.instance_selection_method == 'amil':
-            # [batch_size, num_instances, 49, 768]
             batch_size = images_embedding.size(0)
             
             # Compute per-instance representation
-            instance_features = images_embedding.mean(dim=2)  # [batch_size, num_instances, 768]
+            instance_features = images_embedding.mean(dim = 2)
             
             # AMIL attention scores
-            hidden = torch.tanh(self.amil_value_proj(instance_features))  # [batch_size, num_instances, 768]
-            weights = self.amil_weight_proj(hidden)  # [batch_size, num_instances, 1]
-            weights = F.softmax(weights, dim=1)  # [batch_size, num_instances, 1]
+            hidden = torch.tanh(self.amil_value_proj(instance_features))
+            weights = self.amil_weight_proj(hidden)
+            weights = F.softmax(weights, dim = 1)
             
             # Weighted sum
-            weighted_features = (instance_features * weights).sum(dim=1)  # [batch_size, 768]
+            weighted_features = (instance_features * weights).sum(dim = 1)
             
             return weighted_features
         
         elif self.instance_selection_method == 'attention_topk':
-            # [batch_size, num_instances, 49, 768]
             batch_size = images_embedding.size(0)
             
             # Compute per-instance representation
-            instance_features = images_embedding.view(batch_size, self.num_instances, -1)  # [batch_size, num_instances, 49*768]
+            instance_features = images_embedding.view(batch_size, self.num_instances, -1)
             
             # Attention scores
-            hidden = torch.tanh(self.topk_value_proj(instance_features))  # [batch_size, num_instances, 49*768]
-            weights = self.topk_weight_proj(hidden)  # [batch_size, num_instances, 1]
-            weights = F.softmax(weights, dim=1)  # [batch_size, num_instances, 1]
+            hidden = torch.tanh(self.topk_value_proj(instance_features))
+            weights = self.topk_weight_proj(hidden)
+            weights = F.softmax(weights, dim = 1)
 
             # Weighted sum
-            weighted_features = (instance_features * weights).sum(dim=1)  # [batch_size, 49*768] ([10, 37632])   
+            weighted_features = (instance_features * weights).sum(dim = 1)
             # Recover per-instance weights
-            recovered_weights = self.topk_dimension_recover(weighted_features).view(batch_size, self.num_instances, 1)  # [batch_size, num_instances, 1] ([10, 10, 1])
+            recovered_weights = self.topk_dimension_recover(weighted_features).view(batch_size, self.num_instances, 1)
             
-            _, indices = torch.topk(recovered_weights, self.num_select, dim=1)
+            _, indices = torch.topk(recovered_weights, self.num_select, dim = 1)
             selected_embeddings = []
             
             for i in range(batch_size):
-                selected = images_embedding[i, indices[i], :, :]  # Select top-k instances by recovered weights
+                # Select top-k instances by recovered weights
+                selected = images_embedding[i, indices[i], :, :]
                 selected_embeddings.append(selected)
             
-            return torch.stack(selected_embeddings)  # [batch_size, num_select, 49, 768]
+            return torch.stack(selected_embeddings)
         
         elif self.instance_selection_method == 'attention_weighted_topk':
-            # [batch_size, num_instances, 49, 768]
             batch_size = images_embedding.size(0)
             
             # Compute per-instance representation
-            instance_features = images_embedding.view(batch_size, self.num_instances, -1)  # [batch_size, num_instances, 49*768]
+            instance_features = images_embedding.view(batch_size, self.num_instances, -1)
             
             # Attention scores
-            hidden = torch.tanh(self.topk_value_proj(instance_features))  # [batch_size, num_instances, 49*768]
-            weights = self.topk_weight_proj(hidden)  # [batch_size, num_instances, 1]
-            weights = F.softmax(weights, dim=1)  # [batch_size, num_instances, 1]
+            hidden = torch.tanh(self.topk_value_proj(instance_features))
+            weights = self.topk_weight_proj(hidden)
+            weights = F.softmax(weights, dim = 1)
 
             # Select top-k instances
-            _, indices = torch.topk(weights, self.num_select, dim=1)
+            _, indices = torch.topk(weights, self.num_select, dim = 1)
             selected_embeddings = []
             
             for i in range(batch_size):
-                selected = images_embedding[i, indices[i].squeeze(), :, :]  # Select the k instances with the highest weights
+                # Select the k instances with the highest weights
+                selected = images_embedding[i, indices[i].squeeze(), :, :]
                 selected_embeddings.append(selected)
             
-            return torch.stack(selected_embeddings)  # [batch_size, num_select, 49, 768]
+            return torch.stack(selected_embeddings)
 
     def forward(self, eeg_data, images_data):
-        '''
-            eeg_data            # [batch_size, 32, 384]
-            eeg_embedding       # [batch_size, 32, 768]
-            images_data         # [batch_size, num_instances, 224, 224, 3]
-            images_embedding    # [batch_size, L_img, 768] (L_img = num_select*49 or num_queries)
-            multi_embedding     # [batch_size, (L_img + 32 + 1), 768]
-        '''
         batch_size = images_data.size(0)
         
         # Process multiple images
         images_embedding = []
         for i in range(self.num_instances):
-            image = images_data[:, i]  # [batch_size, 224, 224, 3]
-            vision_inputs = self.img_processor(image, return_tensors="pt").to(device)
+            image = images_data[:, i]
+            vision_inputs = self.img_processor(image, return_tensors = "pt").to(device)
             embedding = self.swin_model(**vision_inputs).last_hidden_state
             images_embedding.append(embedding)
         
-        images_embedding = torch.stack(images_embedding, dim=1)  # [batch_size, num_instances, 49, 768] (49 = 7x7 patches)
-        # print("After stack:", images_embedding.shape)  # torch.Size([16, 10, 49, 768])
+        images_embedding = torch.stack(images_embedding, dim = 1)
 
         # Select instances
-        selected_embeddings = self.select_instances(images_embedding)  # [batch_size, num_select, 49, 768]
-        # print("After select:", selected_embeddings.shape)  # torch.Size([16, 3, 49, 768])
+        selected_embeddings = self.select_instances(images_embedding)
 
-        selected_embeddings = selected_embeddings.view(batch_size, -1, 768)  # [batch_size, num_select*49, 768]
-        # print("After view:", selected_embeddings.shape)  # torch.Size([16, 147, 768])
+        selected_embeddings = selected_embeddings.view(batch_size, -1, 768)
         
         # Process according to fusion_type
         if self.fusion_type == 'cross_attention':
             query_tokens = self.query_tokens.expand(batch_size, -1, -1)
             image_features, _ = self.cross_attention(
-                query=query_tokens,
-                key=selected_embeddings,
-                value=selected_embeddings
+                query = query_tokens,
+                key = selected_embeddings,
+                value = selected_embeddings
             )
-            images_embedding = image_features  # [batch_size, self.num_queries, 768]
+            images_embedding = image_features
         
         elif self.fusion_type == 'mlp':
             # MLP up/down projection
-            x = self.mlp_up(selected_embeddings)  # [batch_size, num_select*49, 3072]
+            x = self.mlp_up(selected_embeddings)
             x = self.mlp_act(x)
-            images_embedding = self.mlp_down(x)  # [batch_size, num_select*49, 768]
+            images_embedding = self.mlp_down(x)
         
         else:
-            images_embedding = selected_embeddings  # [batch_size, num_select*49, 768]
+            images_embedding = selected_embeddings
 
         eeg_data = self.layernorm(eeg_data)
         eeg_embedding = self.eeg_proj(eeg_data)
@@ -339,13 +358,13 @@ class MultiModalClassifier(nn.Module):
 
         # Add token-type embeddings to distinguish modalities
         images_embedding, eeg_embedding = (
-            images_embedding + self.token_type_embeddings(torch.zeros(images_embedding.shape[0], 1, dtype=torch.long, device=device)),
-            eeg_embedding + self.token_type_embeddings(torch.ones(eeg_embedding.shape[0], 1, dtype=torch.long, device=device))
+            images_embedding + self.token_type_embeddings(torch.zeros(images_embedding.shape[0], 1, dtype = torch.long, device = device)),
+            eeg_embedding + self.token_type_embeddings(torch.ones(eeg_embedding.shape[0], 1, dtype = torch.long, device = device))
         )
 
         # Concatenate image and EEG tokens, prepend CLS, and encode
-        multi_embedding = torch.cat((images_embedding, eeg_embedding), dim=1)
-        multi_embedding = torch.cat((self.cls_token.expand(multi_embedding.size(0), -1, -1), multi_embedding), dim=1)
+        multi_embedding = torch.cat((images_embedding, eeg_embedding), dim = 1)
+        multi_embedding = torch.cat((self.cls_token.expand(multi_embedding.size(0), -1, -1), multi_embedding), dim = 1)
         multi_embedding = self.transformer_encoder(multi_embedding)
 
         # Take the output of the CLS token
